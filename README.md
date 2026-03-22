@@ -52,6 +52,12 @@ Your Personal AI Assistant; easy to install, deploy on your own machine or on th
 
 ---
 
+## Fork Additional Features
+
+- Support Zalo Channel.
+- Support Webhook Channel.
+
+
 ## News
 
 [2026-03-18] We released v0.1.0! See the [v0.1.0 Release Notes](https://agentscope-ai.github.io/CoPaw/release-notes) for the full changelog.
