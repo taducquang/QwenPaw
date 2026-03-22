@@ -374,7 +374,8 @@ class TestOnMessage:
         assert ContentType.TEXT in types
         assert ContentType.IMAGE in types
 
-    def test_allowlist_blocks_unauthorized(self):
+    @pytest.mark.asyncio
+    async def test_allowlist_blocks_unauthorized(self):
         ch = _make_channel(dm_policy="allowlist", allow_from=["allowed_user"])
         enqueued = []
         ch._enqueue = enqueued.append
@@ -454,11 +455,13 @@ class TestSend:
     async def test_send_stops_typing(self):
         ch = _make_channel()
         ch._bridge.send_command = AsyncMock(return_value={"ok": True})
-        ch._typing_tasks["t123"] = MagicMock()
-        ch._typing_tasks["t123"].done.return_value = False
+        mock_task = MagicMock()
+        mock_task.done.return_value = False
+        ch._typing_tasks["t123"] = mock_task
         await ch.send("t123", "Hello!", {"thread_id": "t123"})
-        # Typing task should have been cancelled
-        ch._typing_tasks.get("t123", MagicMock()).cancel.assert_called_once()
+        # Typing task should have been cancelled (and removed from dict)
+        mock_task.cancel.assert_called_once()
+        assert "t123" not in ch._typing_tasks
 
     @pytest.mark.asyncio
     async def test_send_long_text_chunked(self):

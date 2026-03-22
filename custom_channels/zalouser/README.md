@@ -1,74 +1,73 @@
-# Zalo Personal Channel
+# Zalo Personal Channel for CoPaw
 
-This custom channel allows CoPaw to send and receive messages through a **personal Zalo account** (not the official Zalo Business OA API).
+Connects CoPaw to a personal Zalo account using [zca-js](https://github.com/RFS-ADRENO/zca-js).
 
-## ⚠️ Warning
+**WARNING:** This is an unofficial integration using a reverse-engineered API.
+Using Zalo automation may result in account suspension or ban. Use at your own risk.
 
-This is an **unofficial integration** using a reverse-engineered Zalo API. Using this may result in **account suspension or ban**. Use at your own risk.
+## Requirements
 
-## Installation
+- Node.js 18+ (for the bridge subprocess)
+- npm (auto-installs dependencies on first start)
 
-1. Ensure Node.js (v18+) is installed
-2. Copy this `zalouser` directory to your CoPaw `custom_channels/` directory
-3. Install dependencies: `cd custom_channels/zalouser && npm install`
-4. Add configuration to your `config.json` (see below)
-5. Run QR login for first-time authentication
-6. Restart CoPaw
+## Setup
 
-## Configuration
-
-Add to your `config.json` under `channels`:
+1. Enable the channel in `~/.copaw/config.json`:
 
 ```json
-"zalouser": {
-  "enabled": true,
-  "bot_prefix": "",
-  "filter_tool_messages": false,
-  "filter_thinking": false,
-  "dm_policy": "open",
-  "group_policy": "open",  
-  "allow_from": [],
-  "deny_message": "",
-  "require_mention": false,
-  "state_dir": "~/.copaw/zalouser",
-  "show_typing": true
+{
+  "channels": {
+    "zalouser": {
+      "enabled": true,
+      "state_dir": "~/.copaw/zalouser",
+      "show_typing": true,
+      "dm_policy": "open",
+      "group_policy": "open"
+    }
+  }
 }
 ```
 
-## First-time Setup (QR Login)
+2. Start CoPaw. On first run, npm dependencies will auto-install.
 
-Run the QR login script to authenticate with your Zalo account:
+3. Login via QR code (first time):
+   - The channel will log a warning: "QR login required"
+   - A QR code image is saved to `~/.copaw/zalouser/qr.png`
+   - Open the QR image and scan with your Zalo mobile app
+   - Credentials are auto-saved for future sessions
 
-```bash
-cd custom_channels/zalouser
-node qr_gen_v2.mjs
-```
+## Configuration
 
-This will generate a QR code that you can scan with your Zalo mobile app. After scanning, **confirm/approve the login on your phone**.
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `false` | Enable the channel |
+| `state_dir` | string | `~/.copaw/zalouser` | Credential storage |
+| `bot_prefix` | string | `""` | Prefix for bot replies |
+| `show_typing` | bool | `true` | Show typing indicators |
+| `dm_policy` | string | `"open"` | DM access: "open" or "allowlist" |
+| `group_policy` | string | `"open"` | Group access: "open" or "allowlist" |
+| `allow_from` | list | `[]` | Allowed sender IDs |
+| `deny_message` | string | `""` | Rejection message |
+| `require_mention` | bool | `false` | Require @mention in groups |
+| `health_check_interval` | int | `30` | Bridge health ping interval (seconds) |
+| `max_restart_attempts` | int | `5` | Max auto-restart attempts on crash |
 
-Credentials will be saved to `{state_dir}/credentials.json` and used for subsequent logins.
+## Security
 
-## Features
+- Credentials are stored as JSON at `{state_dir}/credentials.json` with mode 0600
+- Ensure this file has restricted permissions
+- Do not commit credentials to version control
+- Add `credentials.json` to `.gitignore`
 
-- ✅ Personal account support (not Business OA)
-- ✅ DM and group messaging
-- ✅ Access control (open/allowlist policies)
-- ✅ Mention gating for groups
-- ✅ Typing indicators
-- ✅ Text message chunking (2000 char limit)
-- ✅ Friends and groups API
+## Supported Features
 
-## Architecture
-
-- **Python Channel**: `ZaloUserChannel` extends CoPaw's `BaseChannel`
-- **Node.js Bridge**: Uses `zca-js` library to communicate with Zalo servers
-- **Communication**: JSON-line protocol over stdin/stdout
-
-## Dependencies
-
-- [`zca-js`](https://github.com/AugusVigworthy/zca-js) - Reverse-engineered Zalo API library
-
-## References
-
-- Based on [OpenClaw's zalouser plugin](https://github.com/openclaw/openclaw/tree/main/extensions/zalouser)
-- CoPaw documentation: https://copaw.agentscope.io/docs
+- Text messages (DM and group)
+- Image sending and receiving
+- File sending and receiving
+- Sticker sending
+- Typing indicators
+- Reactions
+- Access control (allowlist, mention gating)
+- Auto-reconnect on disconnect
+- Crash recovery with exponential backoff
+- Health checks (configurable ping interval)
