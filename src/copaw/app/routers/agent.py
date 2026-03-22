@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 """Agent file management API."""
 
+import asyncio
+import logging
+
 from fastapi import APIRouter, Body, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -9,8 +12,9 @@ from ...config import (
     save_config,
     AgentsRunningConfig,
 )
-
+from ...config.config import load_agent_config, save_agent_config
 from ...agents.memory.agent_md_manager import AgentMdManager
+from ...agents.utils import copy_md_files
 from ..agent_context import get_agent_for_request
 
 router = APIRouter(prefix="/agent", tags=["agent"])
@@ -179,10 +183,14 @@ async def write_memory_file(
     summary="Get agent language",
     description="Get the language setting for agent MD files (en/zh/ru)",
 )
-async def get_agent_language() -> dict:
-    """Get agent language setting."""
-    config = load_config()
-    return {"language": config.agents.language}
+async def get_agent_language(request: Request) -> dict:
+    """Get agent language setting for current agent."""
+    workspace = await get_agent_for_request(request)
+    agent_config = load_agent_config(workspace.agent_id)
+    return {
+        "language": agent_config.language,
+        "agent_id": workspace.agent_id,
+    }
 
 
 @router.put(
@@ -190,16 +198,19 @@ async def get_agent_language() -> dict:
     summary="Update agent language",
     description=(
         "Update the language for agent MD files (en/zh/ru). "
-        "Optionally copies MD files for the new language."
+        "Optionally copies MD files for the new language to agent workspace."
     ),
 )
 async def put_agent_language(
+    request: Request,
     body: dict = Body(
         ...,
         description='Language setting, e.g. {"language": "zh"}',
     ),
 ) -> dict:
-    """Update agent language and optionally re-copy MD files."""
+    """
+    Update agent language and optionally re-copy MD files to agent workspace.
+    """
     language = (body.get("language") or "").strip().lower()
     valid = {"zh", "en", "ru"}
     if language not in valid:
@@ -210,25 +221,200 @@ async def put_agent_language(
                 f"Must be one of: {', '.join(sorted(valid))}"
             ),
         )
-    config = load_config()
-    old_language = config.agents.language
-    config.agents.language = language
-    save_config(config)
+
+    # Get current agent's workspace
+    workspace = await get_agent_for_request(request)
+    agent_id = workspace.agent_id
+
+    # Load agent config
+    agent_config = load_agent_config(agent_id)
+    old_language = agent_config.language
+
+    # Update agent's language
+    agent_config.language = language
+    save_agent_config(agent_id, agent_config)
 
     copied_files: list[str] = []
     if old_language != language:
-        from ...agents.utils import copy_md_files
-
-        copied_files = copy_md_files(language) or []
-        if copied_files:
-            config = load_config()
-            config.agents.installed_md_files_language = language
-            save_config(config)
+        # Copy MD files to agent's workspace directory
+        copied_files = (
+            copy_md_files(
+                language,
+                workspace_dir=workspace.workspace_dir,
+            )
+            or []
+        )
 
     return {
         "language": language,
         "copied_files": copied_files,
+        "agent_id": agent_id,
     }
+
+
+@router.get(
+    "/audio-mode",
+    summary="Get audio mode",
+    description=(
+        "Get the audio handling mode for incoming voice messages. "
+        'Values: "auto", "native".'
+    ),
+)
+async def get_audio_mode() -> dict:
+    """Get audio mode setting."""
+    config = load_config()
+    return {"audio_mode": config.agents.audio_mode}
+
+
+@router.put(
+    "/audio-mode",
+    summary="Update audio mode",
+    description=(
+        "Update how incoming audio/voice messages are handled. "
+        '"auto": transcribe if provider available, else file placeholder; '
+        '"native": send audio directly to model (may need ffmpeg).'
+    ),
+)
+async def put_audio_mode(
+    body: dict = Body(
+        ...,
+        description='Audio mode, e.g. {"audio_mode": "auto"}',
+    ),
+) -> dict:
+    """Update audio mode setting."""
+    raw = body.get("audio_mode")
+    audio_mode = (str(raw) if raw is not None else "").strip().lower()
+    valid = {"auto", "native"}
+    if audio_mode not in valid:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid audio_mode '{audio_mode}'. "
+                f"Must be one of: {', '.join(sorted(valid))}"
+            ),
+        )
+    config = load_config()
+    config.agents.audio_mode = audio_mode
+    save_config(config)
+    return {"audio_mode": audio_mode}
+
+
+@router.get(
+    "/transcription-provider-type",
+    summary="Get transcription provider type",
+    description=(
+        "Get the transcription provider type. "
+        'Values: "disabled", "whisper_api", "local_whisper".'
+    ),
+)
+async def get_transcription_provider_type() -> dict:
+    """Get transcription provider type setting."""
+    config = load_config()
+    return {
+        "transcription_provider_type": (
+            config.agents.transcription_provider_type
+        ),
+    }
+
+
+@router.put(
+    "/transcription-provider-type",
+    summary="Set transcription provider type",
+    description=(
+        "Set the transcription provider type. "
+        '"disabled": no transcription; '
+        '"whisper_api": remote Whisper endpoint; '
+        '"local_whisper": locally installed openai-whisper.'
+    ),
+)
+async def put_transcription_provider_type(
+    body: dict = Body(
+        ...,
+        description=(
+            "Provider type, e.g. "
+            '{"transcription_provider_type": "whisper_api"}'
+        ),
+    ),
+) -> dict:
+    """Set the transcription provider type."""
+    raw = body.get("transcription_provider_type")
+    provider_type = (str(raw) if raw is not None else "").strip().lower()
+    valid = {"disabled", "whisper_api", "local_whisper"}
+    if provider_type not in valid:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid transcription_provider_type '{provider_type}'. "
+                f"Must be one of: {', '.join(sorted(valid))}"
+            ),
+        )
+    config = load_config()
+    config.agents.transcription_provider_type = provider_type
+    save_config(config)
+    return {"transcription_provider_type": provider_type}
+
+
+@router.get(
+    "/local-whisper-status",
+    summary="Check local whisper availability",
+    description=(
+        "Check whether the local whisper provider can be used. "
+        "Returns availability of ffmpeg and openai-whisper."
+    ),
+)
+async def get_local_whisper_status() -> dict:
+    """Check local whisper dependencies."""
+    from ...agents.utils.audio_transcription import (
+        check_local_whisper_available,
+    )
+
+    return check_local_whisper_available()
+
+
+@router.get(
+    "/transcription-providers",
+    summary="List transcription providers",
+    description=(
+        "List providers capable of audio transcription (Whisper API). "
+        "Returns available providers and the configured selection."
+    ),
+)
+async def get_transcription_providers() -> dict:
+    """List transcription-capable providers and configured selection."""
+    from ...agents.utils.audio_transcription import (
+        get_configured_transcription_provider_id,
+        list_transcription_providers,
+    )
+
+    return {
+        "providers": list_transcription_providers(),
+        "configured_provider_id": (get_configured_transcription_provider_id()),
+    }
+
+
+@router.put(
+    "/transcription-provider",
+    summary="Set transcription provider",
+    description=(
+        "Set the provider to use for audio transcription. "
+        'Use empty string "" to unset.'
+    ),
+)
+async def put_transcription_provider(
+    body: dict = Body(
+        ...,
+        description=(
+            'Provider ID, e.g. {"provider_id": "openai"} '
+            'or {"provider_id": ""} to unset'
+        ),
+    ),
+) -> dict:
+    """Set the transcription provider."""
+    provider_id = (body.get("provider_id") or "").strip()
+    config = load_config()
+    config.agents.transcription_provider_id = provider_id
+    save_config(config)
+    return {"provider_id": provider_id}
 
 
 @router.get(
@@ -242,8 +428,6 @@ async def get_agents_running_config(
 ) -> AgentsRunningConfig:
     """Get agent running configuration."""
     workspace = await get_agent_for_request(request)
-    from ...config.config import load_agent_config
-
     agent_config = load_agent_config(workspace.agent_id)
     return agent_config.running or AgentsRunningConfig()
 
@@ -263,22 +447,20 @@ async def put_agents_running_config(
 ) -> AgentsRunningConfig:
     """Update agent running configuration."""
     workspace = await get_agent_for_request(request)
-    from ...config.config import load_agent_config, save_agent_config
-
     agent_config = load_agent_config(workspace.agent_id)
     agent_config.running = running_config
     save_agent_config(workspace.agent_id, agent_config)
 
     # Hot reload config (async, non-blocking)
-    import asyncio
+    # IMPORTANT: Get manager and agent_id before creating background task
+    # to avoid accessing request/workspace after their lifecycle ends
+    manager = request.app.state.multi_agent_manager
+    agent_id = workspace.agent_id
 
     async def reload_in_background():
         try:
-            manager = request.app.state.multi_agent_manager
-            await manager.reload_agent(workspace.agent_id)
+            await manager.reload_agent(agent_id)
         except Exception as e:
-            import logging
-
             logging.getLogger(__name__).warning(
                 f"Background reload failed: {e}",
             )
@@ -299,8 +481,6 @@ async def get_system_prompt_files(
 ) -> list[str]:
     """Get list of enabled system prompt files."""
     workspace = await get_agent_for_request(request)
-    from ...config.config import load_agent_config
-
     agent_config = load_agent_config(workspace.agent_id)
     return agent_config.system_prompt_files or []
 
@@ -320,22 +500,20 @@ async def put_system_prompt_files(
 ) -> list[str]:
     """Update list of enabled system prompt files."""
     workspace = await get_agent_for_request(request)
-    from ...config.config import load_agent_config, save_agent_config
-
     agent_config = load_agent_config(workspace.agent_id)
     agent_config.system_prompt_files = files
     save_agent_config(workspace.agent_id, agent_config)
 
     # Hot reload config (async, non-blocking)
-    import asyncio
+    # IMPORTANT: Get manager before creating background task to avoid
+    # accessing request object after its lifecycle ends
+    manager = request.app.state.multi_agent_manager
+    agent_id = workspace.agent_id
 
     async def reload_in_background():
         try:
-            manager = request.app.state.multi_agent_manager
-            await manager.reload_agent(workspace.agent_id)
+            await manager.reload_agent(agent_id)
         except Exception as e:
-            import logging
-
             logging.getLogger(__name__).warning(
                 f"Background reload failed: {e}",
             )

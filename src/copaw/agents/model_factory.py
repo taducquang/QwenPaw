@@ -11,13 +11,10 @@ Example:
 
 
 import logging
-from typing import Any, Optional, Sequence, Tuple, Type
-from functools import wraps
+from typing import List, Sequence, Tuple, Type, Any, Union, Optional
 
 from agentscope.formatter import FormatterBase, OpenAIChatFormatter
 from agentscope.model import ChatModelBase, OpenAIChatModel
-from agentscope.message import Msg
-import agentscope
 
 try:
     from agentscope.formatter import AnthropicChatFormatter
@@ -37,6 +34,7 @@ from .utils.tool_message_utils import _sanitize_tool_messages
 from ..providers import ProviderManager
 from ..providers.retry_chat_model import RetryChatModel
 from ..token_usage import TokenRecordingModelWrapper
+from ..local_models import create_local_chat_model
 
 
 def _file_url_to_path(url: str) -> str:
@@ -48,36 +46,6 @@ def _file_url_to_path(url: str) -> str:
     if len(s) >= 3 and s.startswith("/") and s[1].isalpha() and s[2] == ":":
         s = s[1:]
     return s
-
-
-def _monkey_patch(func):
-    """A monkey patch wrapper for agentscope <= 1.0.16dev"""
-
-    @wraps(func)
-    async def wrapper(
-        self,
-        msgs: list[Msg],
-        **kwargs: Any,
-    ) -> list[dict[str, Any]]:
-        for msg in msgs:
-            if isinstance(msg.content, str):
-                continue
-            if isinstance(msg.content, list):
-                for block in msg.content:
-                    if (
-                        block["type"] in ["audio", "image", "video"]
-                        and block.get("source", {}).get("type") == "url"
-                    ):
-                        url = block["source"]["url"]
-                        if url.startswith("file://"):
-                            block["source"]["url"] = _file_url_to_path(url)
-        return await func(self, msgs, **kwargs)
-
-    return wrapper
-
-
-if agentscope.__version__ in ["1.0.16dev", "1.0.16"]:
-    OpenAIChatFormatter.format = _monkey_patch(OpenAIChatFormatter.format)
 
 
 logger = logging.getLogger(__name__)
@@ -110,6 +78,7 @@ def _get_formatter_for_chat_model(
     )
 
 
+# pylint: disable-next=too-many-statements
 def _create_file_block_support_formatter(
     base_formatter_class: Type[FormatterBase],
 ) -> Type[FormatterBase]:
@@ -159,6 +128,20 @@ def _create_file_block_support_formatter(
                     ):
                         extra_contents[block["id"]] = block["extra_content"]
 
+            # Convert file:// URLs to paths,
+            # TODO: remove this after AgentScope updated
+            for msg in msgs:
+                for block in msg.get_content_blocks():
+                    if block.get("type") == "audio":
+                        source = block.get("source")
+                        if (
+                            isinstance(source, dict)
+                            and source.get("type") == "url"
+                            and isinstance(source.get("url"), str)
+                            and source["url"].startswith("file://")
+                        ):
+                            source["url"] = _file_url_to_path(source["url"])
+
             messages = await super()._format(msgs)
 
             if extra_contents:
@@ -169,32 +152,44 @@ def _create_file_block_support_formatter(
                             tc["extra_content"] = ec
 
             if reasoning_contents:
-                in_assistant = [m for m in msgs if m.role == "assistant"]
+                # Build a list of reasoning values aligned with surviving
+                # assistant messages.  The parent formatter drops
+                # thinking-only messages (no content/tool_calls), so we
+                # predict survivors and collect reasoning only for those.
+                aligned_reasoning = []
+                for m in (msg for msg in msgs if msg.role == "assistant"):
+                    is_thinking_only = (
+                        isinstance(m.content, list)
+                        and m.content
+                        and all(b.get("type") == "thinking" for b in m.content)
+                    )
+                    if not is_thinking_only:
+                        aligned_reasoning.append(
+                            reasoning_contents.get(id(m)),
+                        )
+
                 out_assistant = [
                     m for m in messages if m.get("role") == "assistant"
                 ]
-                if len(in_assistant) != len(out_assistant):
+
+                if len(aligned_reasoning) != len(out_assistant):
                     logger.warning(
                         "Assistant message count mismatch after formatting "
-                        "(%d before, %d after). "
+                        "(%d expected survivors, %d actual). "
                         "Skipping reasoning_content injection.",
-                        len(in_assistant),
+                        len(aligned_reasoning),
                         len(out_assistant),
                     )
                 else:
-                    for in_msg, out_msg in zip(
-                        in_assistant,
-                        out_assistant,
-                    ):
-                        reasoning = reasoning_contents.get(id(in_msg))
-                        if reasoning:
-                            out_msg["reasoning_content"] = reasoning
+                    for i, out_msg in enumerate(out_assistant):
+                        if aligned_reasoning[i]:
+                            out_msg["reasoning_content"] = aligned_reasoning[i]
 
             return _strip_top_level_message_name(messages)
 
         @staticmethod
         def convert_tool_result_to_string(
-            output: str | list[dict],
+            output: Union[str, List[dict]],
         ) -> tuple[str, Sequence[Tuple[str, dict]]]:
             """Extend parent class to support file blocks.
 
@@ -329,8 +324,6 @@ def create_model_and_formatter(
                 f"Provider '{model_slot.provider_id}' not found.",
             )
         if provider.is_local:
-            from agentscope.model import create_local_chat_model
-
             model = create_local_chat_model(
                 model_id=model_slot.model,
                 stream=True,

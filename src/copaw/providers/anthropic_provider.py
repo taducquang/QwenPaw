@@ -11,6 +11,9 @@ import anthropic
 
 from copaw.providers.provider import ModelInfo, Provider
 
+DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+CODING_DASHSCOPE_BASE_URL = "https://coding.dashscope.aliyuncs.com/v1"
+
 
 class AnthropicProvider(Provider):
     """Provider implementation for Anthropic API."""
@@ -85,7 +88,17 @@ class AnthropicProvider(Provider):
         body = {
             "model": target,
             "max_tokens": 1,
-            "messages": [{"role": "user", "content": "ping"}],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "ping",
+                        },
+                    ],
+                },
+            ],
             "stream": True,
         }
         try:
@@ -106,15 +119,22 @@ class AnthropicProvider(Provider):
     def get_chat_model_instance(self, model_id: str) -> ChatModelBase:
         from agentscope.model import AnthropicChatModel
 
-        dashscope_base_urls = [
-            "https://dashscope.aliyuncs.com/apps/anthropic",
-            "https://coding.dashscope.aliyuncs.com/apps/anthropic",
-        ]
-
         client_kwargs = {"base_url": self.base_url}
-        if self.base_url in dashscope_base_urls:
+        if self.base_url == DASHSCOPE_BASE_URL:
             client_kwargs["default_headers"] = {
                 "x-dashscope-agentapp": json.dumps(
+                    {
+                        "agentType": "CoPaw",
+                        "deployType": "UnKnown",
+                        "moduleCode": "model",
+                        "agentCode": "UnKnown",
+                    },
+                    ensure_ascii=False,
+                ),
+            }
+        elif self.base_url == CODING_DASHSCOPE_BASE_URL:
+            client_kwargs["default_headers"] = {
+                "X-DashScope-Cdpl": json.dumps(
                     {
                         "agentType": "CoPaw",
                         "deployType": "UnKnown",

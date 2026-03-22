@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { message, Modal } from "@agentscope-ai/design";
 import React from "react";
 import api from "../../../api";
@@ -28,7 +28,10 @@ export function useSkills() {
   const { selectedAgent } = useAgentStore();
   const [skills, setSkills] = useState<SkillSpec[]>([]);
   const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const [importing, setImporting] = useState(false);
+  const importTaskIdRef = useRef<string | null>(null);
+  const importCancelReasonRef = useRef<"manual" | "timeout" | null>(null);
 
   const showScanErrorModal = useCallback(
     (scanError: SecurityScanErrorResponse) => {
@@ -104,8 +107,10 @@ export function useSkills() {
         showScanErrorModal(scanError);
         return true;
       }
+      const msg =
+        error instanceof Error && error.message ? error.message : defaultMsg;
       console.error(defaultMsg, error);
-      message.error(defaultMsg);
+      message.error(msg);
       return false;
     },
     [showScanErrorModal],
@@ -229,6 +234,34 @@ export function useSkills() {
     }
   };
 
+  const uploadSkill = async (file: File) => {
+    try {
+      setUploading(true);
+      const result = await api.uploadSkill(file, {
+        enable: false,
+        overwrite: false,
+      });
+      if (result?.count > 0) {
+        message.success(
+          t("skills.uploadSuccess") + `: ${result.imported.join(", ")}`,
+        );
+        await fetchSkills();
+        for (const name of result.imported) {
+          await checkScanWarnings(name);
+        }
+        return true;
+      }
+      message.warning(t("skills.uploadNoChange"));
+      await fetchSkills();
+      return true;
+    } catch (error) {
+      handleError(error, t("skills.uploadFailed"));
+      return false;
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const importFromHub = async (input: string) => {
     const text = (input || "").trim();
     if (!text) {
@@ -241,25 +274,67 @@ export function useSkills() {
       );
       return false;
     }
+    const timeoutMs = 90_000;
+    const pollMs = 1_000;
+    const startedAt = Date.now();
     try {
       setImporting(true);
+      importCancelReasonRef.current = null;
       const payload = { bundle_url: text, enable: true, overwrite: false };
-      const result = await api.installHubSkill(payload);
-      if (result?.installed) {
-        message.success(`Imported skill: ${result.name}`);
-        await fetchSkills();
-        if (result.name) await checkScanWarnings(result.name);
-        return true;
+      const task = await api.startHubSkillInstall(payload);
+      importTaskIdRef.current = task.task_id;
+
+      while (importTaskIdRef.current) {
+        const status = await api.getHubSkillInstallStatus(task.task_id);
+
+        if (status.status === "completed" && status.result?.installed) {
+          message.success(`Imported skill: ${status.result.name}`);
+          await fetchSkills();
+          if (status.result.name) await checkScanWarnings(status.result.name);
+          return true;
+        }
+
+        if (status.status === "failed") {
+          throw new Error(status.error || "Import failed");
+        }
+
+        if (status.status === "cancelled") {
+          message.warning(
+            t(
+              importCancelReasonRef.current === "timeout"
+                ? "skills.importTimeout"
+                : "skills.importCancelled",
+            ),
+          );
+          return false;
+        }
+
+        if (Date.now() - startedAt >= timeoutMs) {
+          importCancelReasonRef.current = "timeout";
+          await api.cancelHubSkillInstall(task.task_id);
+        }
+
+        await new Promise((resolve) => window.setTimeout(resolve, pollMs));
       }
-      message.error("Import failed");
+
       return false;
     } catch (error) {
       handleError(error, "Import failed");
       return false;
     } finally {
+      importTaskIdRef.current = null;
+      importCancelReasonRef.current = null;
       setImporting(false);
     }
   };
+
+  const cancelImport = useCallback(() => {
+    if (!importing) return;
+    importCancelReasonRef.current = "manual";
+    const taskId = importTaskIdRef.current;
+    if (!taskId) return;
+    void api.cancelHubSkillInstall(taskId);
+  }, [importing]);
 
   const toggleEnabled = async (skill: SkillSpec) => {
     try {
@@ -323,8 +398,11 @@ export function useSkills() {
   return {
     skills,
     loading,
+    uploading,
     importing,
+    cancelImport,
     createSkill,
+    uploadSkill,
     importFromHub,
     toggleEnabled,
     deleteSkill,

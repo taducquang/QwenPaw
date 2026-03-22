@@ -25,6 +25,7 @@ from ..config.config import (
 )
 from ..constant import HEARTBEAT_DEFAULT_EVERY
 from ..providers import ProviderManager
+from ..constant import WORKING_DIR
 
 SECURITY_WARNING = """
 Security warning — please read.
@@ -171,10 +172,13 @@ def init_cmd(
     from ..utils.telemetry import (
         collect_and_upload_telemetry,
         has_telemetry_been_collected,
+        is_telemetry_opted_out,
         mark_telemetry_collected,
     )
 
-    if not has_telemetry_been_collected(working_dir):
+    if not is_telemetry_opted_out(
+        working_dir,
+    ) and not has_telemetry_been_collected(working_dir):
         if use_defaults:
             success = collect_and_upload_telemetry(working_dir)
 
@@ -185,7 +189,7 @@ def init_cmd(
                 if success:
                     click.echo("✓ Thank you!")
             else:
-                mark_telemetry_collected(working_dir)
+                mark_telemetry_collected(working_dir, opted_out=True)
 
     # --- Ensure default agent workspace exists ---
     click.echo("\n=== Default Workspace Initialization ===")
@@ -193,7 +197,7 @@ def init_cmd(
     click.echo("✓ Default workspace initialized")
 
     # Get default workspace path for subsequent operations
-    default_workspace = Path("~/.copaw/workspaces/default").expanduser()
+    default_workspace = Path(f"{WORKING_DIR}/workspaces/default").expanduser()
 
     # --- config.json ---
     write_config = True
@@ -277,6 +281,32 @@ def init_cmd(
                 default=existing.agents.language,
             )
             existing.agents.language = language
+
+        # --- audio mode selection ---
+        if not use_defaults:
+            audio_mode = prompt_choice(
+                "Select audio mode for voice messages:\n"
+                "  auto   - transcribe if provider available, else file placeholder\n"
+                "  native - send audio directly to model (needs ffmpeg)\n"
+                "Audio mode:",
+                options=["auto", "native"],
+                default=existing.agents.audio_mode,
+            )
+            existing.agents.audio_mode = audio_mode
+
+        # --- transcription provider type selection ---
+        if not use_defaults and audio_mode != "native":
+            provider_type = prompt_choice(
+                "Select transcription provider:\n"
+                "  disabled       - no transcription\n"
+                "  whisper_api    - remote Whisper API endpoint\n"
+                "  local_whisper  - locally installed openai-whisper\n"
+                "                   (requires ffmpeg + openai-whisper)\n"
+                "Provider:",
+                options=["disabled", "whisper_api", "local_whisper"],
+                default=existing.agents.transcription_provider_type,
+            )
+            existing.agents.transcription_provider_type = provider_type
 
         # --- channels (interactive when not --defaults) ---
         if not use_defaults and prompt_confirm(

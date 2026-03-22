@@ -208,10 +208,14 @@ Each channel has a common base and channel-specific fields.
 
 **`channels.dingtalk`** — DingTalk (钉钉)
 
-| Field           | Type   | Default | Description                |
-| --------------- | ------ | ------- | -------------------------- |
-| `client_id`     | string | `""`    | DingTalk app Client ID     |
-| `client_secret` | string | `""`    | DingTalk app Client Secret |
+| Field               | Type   | Default      | Description                                                                |
+| ------------------- | ------ | ------------ | -------------------------------------------------------------------------- |
+| `client_id`         | string | `""`         | DingTalk app Client ID                                                     |
+| `client_secret`     | string | `""`         | DingTalk app Client Secret                                                 |
+| `message_type`      | string | `"markdown"` | Message mode: `markdown` (default) or `card` (AI interactive card)         |
+| `card_template_id`  | string | `""`         | DingTalk AI Card template ID (required when `message_type` is `card`)      |
+| `card_template_key` | string | `"content"`  | AI Card variable key; must exactly match your template variable name       |
+| `robot_code`        | string | `""`         | Robot code (recommended explicit config for group card delivery scenarios) |
 
 **`channels.feishu`** — Feishu / Lark (飞书)
 
@@ -444,20 +448,17 @@ Memory files are stored in two locations:
 
 ### Embedding Configuration
 
-Memory search relies on vector embeddings for semantic retrieval. Configure via these environment variables:
+Memory search relies on vector embeddings for semantic retrieval. Configuration priority: **config file > env var > default**.
 
-| Variable                     | Description                       | Default                                             |
-| ---------------------------- | --------------------------------- | --------------------------------------------------- |
-| `EMBEDDING_API_KEY`          | API key for the embedding service | ``                                                  |
-| `EMBEDDING_BASE_URL`         | Embedding service URL             | `https://dashscope.aliyuncs.com/compatible-mode/v1` |
-| `EMBEDDING_MODEL_NAME`       | Embedding model name              | `text-embedding-v4`                                 |
-| `EMBEDDING_DIMENSIONS`       | Vector dimensions                 | `1024`                                              |
-| `EMBEDDING_CACHE_ENABLED`    | Enable Embedding cache            | `true`                                              |
-| `EMBEDDING_MAX_CACHE_SIZE`   | Max cache entries for Embedding   | `2000`                                              |
-| `EMBEDDING_MAX_INPUT_LENGTH` | Max input length per Embedding    | `8192`                                              |
-| `EMBEDDING_MAX_BATCH_SIZE`   | Max batch size for Embedding      | `10`                                                |
+Recommended to configure in `agent.json` under `running.embedding_config`, which supports more parameters (e.g., `use_dimensions`). Environment variables serve as fallback only:
 
-> Both `EMBEDDING_API_KEY` and `EMBEDDING_MODEL_NAME` must be non-empty to enable vector search in hybrid retrieval.
+| Variable (Fallback)    | Description                       | Default |
+| ---------------------- | --------------------------------- | ------- |
+| `EMBEDDING_API_KEY`    | API key for the embedding service | ``      |
+| `EMBEDDING_BASE_URL`   | Embedding service URL             | ``      |
+| `EMBEDDING_MODEL_NAME` | Embedding model name              | ``      |
+
+> `api_key`, `model_name`, and `base_url` must all be non-empty to enable vector search in hybrid retrieval. See [Memory](./memory.en.md#embedding-configuration-optional) for full configuration details.
 
 ---
 

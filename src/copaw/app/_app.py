@@ -17,6 +17,7 @@ from ..config.utils import get_config_path
 from ..constant import DOCS_ENABLED, LOG_LEVEL_ENV, CORS_ORIGINS, WORKING_DIR
 from ..__version__ import __version__
 from ..utils.logging import setup_logger, add_copaw_file_handler
+from .auth import AuthMiddleware
 from .routers import router as api_router, create_agent_scoped_router
 from .routers.agent_scoped import AgentContextMiddleware
 from .routers.voice import voice_router
@@ -76,8 +77,9 @@ class DynamicMultiAgentRunner:
         try:
             workspace = await self._multi_agent_manager.get_agent(agent_id)
             logger.debug(
-                f"Got workspace: {workspace.agent_id}, "
-                f"runner: {workspace.runner}",
+                "Got workspace: %s, runner: %s",
+                workspace.agent_id,
+                workspace.runner,
             )
             return workspace.runner
         except ValueError as e:
@@ -149,6 +151,28 @@ async def lifespan(
 ):  # pylint: disable=too-many-statements,too-many-branches
     startup_start_time = time.time()
     add_copaw_file_handler(WORKING_DIR / "copaw.log")
+
+    # Auto-register admin from env vars (for automated deployments)
+    from .auth import auto_register_from_env
+
+    auto_register_from_env()
+
+    try:
+        from ..utils.telemetry import (
+            collect_and_upload_telemetry,
+            has_telemetry_been_collected,
+            is_telemetry_opted_out,
+        )
+
+        if not is_telemetry_opted_out(
+            WORKING_DIR,
+        ) and not has_telemetry_been_collected(WORKING_DIR):
+            collect_and_upload_telemetry(WORKING_DIR)
+    except Exception:
+        logger.debug(
+            "Telemetry collection skipped due to error",
+            exc_info=True,
+        )
 
     # --- Multi-agent migration and initialization ---
     logger.info("Checking for legacy config migration...")
@@ -224,6 +248,8 @@ app = FastAPI(
 # Add agent context middleware for agent-scoped routes
 app.add_middleware(AgentContextMiddleware)
 
+app.add_middleware(AuthMiddleware)
+
 # Apply CORS middleware if CORS_ORIGINS is set
 if CORS_ORIGINS:
     origins = [o.strip() for o in CORS_ORIGINS.split(",") if o.strip()]
@@ -233,6 +259,7 @@ if CORS_ORIGINS:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["Content-Disposition"],
     )
 
 
@@ -243,20 +270,30 @@ _CONSOLE_STATIC_ENV = "COPAW_CONSOLE_STATIC_DIR"
 def _resolve_console_static_dir() -> str:
     if os.environ.get(_CONSOLE_STATIC_ENV):
         return os.environ[_CONSOLE_STATIC_ENV]
-    # Shipped dist lives in copaw package as static data (not a Python pkg).
+    # Shipped dist lives in copaw package as static data
     pkg_dir = Path(__file__).resolve().parent.parent
     candidate = pkg_dir / "console"
     if candidate.is_dir() and (candidate / "index.html").exists():
         return str(candidate)
-    # the following code can be removed after next release,
-    # because the console will be output to copaw's
-    # `src/copaw/console/` directory directly by vite.
+
+    # Fallback to repo data
+    repo_dir = pkg_dir.parent.parent
+    candidate = repo_dir / "console" / "dist"
+    if candidate.is_dir() and (candidate / "index.html").exists():
+        return str(candidate)
+
+    # Fallback to cwd data
     cwd = Path(os.getcwd())
     for subdir in ("console/dist", "console_dist"):
         candidate = cwd / subdir
         if candidate.is_dir() and (candidate / "index.html").exists():
             return str(candidate)
-    return str(cwd / "console" / "dist")
+
+    fallback = cwd / "console" / "dist"
+    logger.warning(
+        f"Console static directory not found. Falling back to '{fallback}'.",
+    )
+    return str(fallback)
 
 
 _CONSOLE_STATIC_DIR = _resolve_console_static_dir()
@@ -304,8 +341,8 @@ app.include_router(
 # POST /voice/incoming, WS /voice/ws, POST /voice/status-callback
 app.include_router(voice_router, tags=["voice"])
 
-# Mount console: root static files (logo.png etc.) then assets, then SPA
-# fallback.
+# Console static files and SPA fallback
+# Register these AFTER API routes to ensure proper routing priority
 if os.path.isdir(_CONSOLE_STATIC_DIR):
     _console_path = Path(_CONSOLE_STATIC_DIR)
 
@@ -320,7 +357,13 @@ if os.path.isdir(_CONSOLE_STATIC_DIR):
         f = _console_path / "logo.png"
         if f.is_file():
             return FileResponse(f, media_type="image/png")
+        raise HTTPException(status_code=404, detail="Not Found")
 
+    @app.get("/dark-logo.png")
+    def _console_dark_logo():
+        f = _console_path / "dark-logo.png"
+        if f.is_file():
+            return FileResponse(f, media_type="image/png")
         raise HTTPException(status_code=404, detail="Not Found")
 
     @app.get("/copaw-symbol.svg")
@@ -328,7 +371,13 @@ if os.path.isdir(_CONSOLE_STATIC_DIR):
         f = _console_path / "copaw-symbol.svg"
         if f.is_file():
             return FileResponse(f, media_type="image/svg+xml")
+        raise HTTPException(status_code=404, detail="Not Found")
 
+    @app.get("/copaw-dark.png")
+    def _console_dark_icon():
+        f = _console_path / "copaw-dark.png"
+        if f.is_file():
+            return FileResponse(f, media_type="image/png")
         raise HTTPException(status_code=404, detail="Not Found")
 
     _assets_dir = _console_path / "assets"
@@ -346,7 +395,14 @@ if os.path.isdir(_CONSOLE_STATIC_DIR):
         _ = full_path
         return _serve_console_index()
 
+    # SPA fallback: catch-all route for frontend routing
+    # Must be registered AFTER all API routes to avoid conflicts
     @app.get("/{full_path:path}")
     def _console_spa(full_path: str):
-        _ = full_path
+        # Prevent catching common system/special paths
+        if full_path in ("docs", "redoc", "openapi.json"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        # Skip API routes (should already be matched due to registration order)
+        if full_path.startswith("api/") or full_path == "api":
+            raise HTTPException(status_code=404, detail="Not Found")
         return _serve_console_index()

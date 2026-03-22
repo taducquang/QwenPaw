@@ -1,6 +1,10 @@
-import { useState } from "react";
-import { Button, Form, Modal } from "@agentscope-ai/design";
-import { DownloadOutlined, PlusOutlined } from "@ant-design/icons";
+import { useState, useRef } from "react";
+import { Button, Form, Modal, message } from "@agentscope-ai/design";
+import {
+  DownloadOutlined,
+  PlusOutlined,
+  UploadOutlined,
+} from "@ant-design/icons";
 import type { SkillSpec } from "../../../api/types";
 import { SkillCard, SkillDrawer } from "./components";
 import { useSkills } from "./useSkills";
@@ -12,8 +16,11 @@ function SkillsPage() {
   const {
     skills,
     loading,
+    uploading,
     importing,
+    cancelImport,
     createSkill,
+    uploadSkill,
     importFromHub,
     toggleEnabled,
     deleteSkill,
@@ -25,6 +32,36 @@ function SkillsPage() {
   const [editingSkill, setEditingSkill] = useState<SkillSpec | null>(null);
   const [hoverKey, setHoverKey] = useState<string | null>(null);
   const [form] = Form.useForm<SkillSpec>();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const MAX_UPLOAD_SIZE_MB = 100;
+
+  const handleUploadClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Reset input so the same file can be re-selected
+    e.target.value = "";
+
+    if (!file.name.toLowerCase().endsWith(".zip")) {
+      message.warning(t("skills.zipOnly"));
+      return;
+    }
+
+    const sizeMB = file.size / (1024 * 1024);
+    if (sizeMB > MAX_UPLOAD_SIZE_MB) {
+      message.warning(
+        t("skills.fileSizeExceeded", { size: sizeMB.toFixed(1) }),
+      );
+      return;
+    }
+
+    await uploadSkill(file);
+  };
 
   const supportedSkillUrlPrefixes = [
     "https://skills.sh/",
@@ -33,6 +70,7 @@ function SkillsPage() {
     "https://lobehub.com/",
     "https://market.lobehub.com/",
     "https://github.com/",
+    "https://modelscope.cn/skills/",
   ];
 
   const isSupportedSkillUrl = (url: string) => {
@@ -125,6 +163,22 @@ function SkillsPage() {
           <p className={styles.description}>{t("skills.description")}</p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
+          <input
+            type="file"
+            accept=".zip"
+            ref={fileInputRef}
+            onChange={handleFileChange}
+            style={{ display: "none" }}
+          />
+          <Button
+            type="primary"
+            onClick={handleUploadClick}
+            icon={<UploadOutlined />}
+            loading={uploading}
+            disabled={uploading}
+          >
+            {t("skills.uploadSkill")}
+          </Button>
           <Button
             type="primary"
             onClick={handleImportFromHub}
@@ -148,11 +202,10 @@ function SkillsPage() {
         footer={
           <div style={{ textAlign: "right" }}>
             <Button
-              onClick={closeImportModal}
+              onClick={importing ? cancelImport : closeImportModal}
               style={{ marginRight: 8 }}
-              disabled={importing}
             >
-              {t("common.cancel")}
+              {t(importing ? "skills.cancelImport" : "common.cancel")}
             </Button>
             <Button
               type="primary"
@@ -177,6 +230,7 @@ function SkillsPage() {
             <li>https://lobehub.com/</li>
             <li>https://market.lobehub.com/</li>
             <li>https://github.com/</li>
+            <li>https://modelscope.cn/skills/</li>
           </ul>
           <p className={styles.importHintTitle}>{t("skills.urlExamples")}</p>
           <ul className={styles.importHintList}>
@@ -188,6 +242,7 @@ function SkillsPage() {
             <li>
               https://github.com/anthropics/skills/tree/main/skills/skill-creator
             </li>
+            <li>https://modelscope.cn/skills/@anthropics/skill-creator</li>
           </ul>
         </div>
 
