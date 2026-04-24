@@ -18,6 +18,19 @@ export interface ToolGuardConfig {
   denied_tools: string[];
   custom_rules: ToolGuardRule[];
   disabled_rules: string[];
+  shell_evasion_checks: Record<string, boolean>;
+}
+
+// ── File Guard types ──────────────────────────────────────────────
+
+export interface FileGuardResponse {
+  enabled: boolean;
+  paths: string[];
+}
+
+export interface FileGuardUpdateBody {
+  enabled?: boolean;
+  paths?: string[];
 }
 
 // ── Skill Scanner types ────────────────────────────────────────────
@@ -62,6 +75,16 @@ export interface SecurityScanErrorResponse {
   findings: BlockedSkillFinding[];
 }
 
+// ── Allow No Auth Hosts types ──────────────────────────────────────
+
+export interface AllowNoAuthHostsResponse {
+  hosts: string[];
+}
+
+export interface AllowNoAuthHostsUpdateBody {
+  hosts: string[];
+}
+
 export const securityApi = {
   // ── Tool Guard ──────────────────────────────────────────────────
 
@@ -75,6 +98,16 @@ export const securityApi = {
 
   getBuiltinRules: () =>
     request<ToolGuardRule[]>("/config/security/tool-guard/builtin-rules"),
+
+  // ── File Guard ─────────────────────────────────────────────────
+
+  getFileGuard: () => request<FileGuardResponse>("/config/security/file-guard"),
+
+  updateFileGuard: (body: FileGuardUpdateBody) =>
+    request<FileGuardResponse>("/config/security/file-guard", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
 
   // ── Skill Scanner ───────────────────────────────────────────────
 
@@ -123,4 +156,15 @@ export const securityApi = {
       )}`,
       { method: "DELETE" },
     ),
+
+  // ── Allow No Auth Hosts ─────────────────────────────────────────
+
+  getAllowNoAuthHosts: () =>
+    request<AllowNoAuthHostsResponse>("/config/security/allow-no-auth-hosts"),
+
+  updateAllowNoAuthHosts: (body: AllowNoAuthHostsUpdateBody) =>
+    request<AllowNoAuthHostsResponse>("/config/security/allow-no-auth-hosts", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
 };

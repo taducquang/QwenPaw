@@ -1,9 +1,10 @@
 import React, { useState, useMemo } from "react";
-import { Button, Card, Input, Switch, message } from "@agentscope-ai/design";
+import { Button, Card, Input, Switch } from "@agentscope-ai/design";
 import { CopyOutlined, UndoOutlined, SaveOutlined } from "@ant-design/icons";
 import type { MarkdownFile } from "../../../../api/types";
 import { XMarkdown } from "@ant-design/x-markdown";
 import { useTranslation } from "react-i18next";
+import { useAppMessage } from "../../../../hooks/useAppMessage";
 import { stripFrontmatter } from "../../../../utils/markdown";
 import styles from "../index.module.less";
 
@@ -27,6 +28,7 @@ export const FileEditor: React.FC<FileEditorProps> = ({
   onReset,
 }) => {
   const { t } = useTranslation();
+  const { message } = useAppMessage();
   const [showMarkdown, setShowMarkdown] = useState(true);
 
   const isMarkdownFile = selectedFile?.filename.endsWith(".md") || false;
@@ -119,6 +121,15 @@ export const FileEditor: React.FC<FileEditorProps> = ({
                 <XMarkdown
                   content={markdownContent}
                   className={styles.markdownViewer}
+                  dompurifyConfig={{
+                    ADD_TAGS: ["pre", "code"],
+                    ADD_ATTR: [
+                      "data-block",
+                      "data-state",
+                      "data-lang",
+                      "class",
+                    ],
+                  }}
                 />
               ) : (
                 <Input.TextArea
@@ -133,6 +144,7 @@ export const FileEditor: React.FC<FileEditorProps> = ({
         ) : (
           <div className={styles.emptyState}>{t("workspace.selectFile")}</div>
         )}
+        <p className={styles.attribution}>{t("workspace.attribution")}</p>
       </Card>
     </div>
   );

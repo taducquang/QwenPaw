@@ -1,12 +1,7 @@
 import { useEffect, useState } from "react";
-import {
-  Card,
-  Form,
-  Modal,
-  Table,
-  message,
-  Button,
-} from "@agentscope-ai/design";
+import { useNavigate } from "react-router-dom";
+import { Card, Form, Modal, Table, Button } from "@agentscope-ai/design";
+import { useAppMessage } from "../../../hooks/useAppMessage";
 import { useTranslation } from "react-i18next";
 import {
   createColumns,
@@ -16,10 +11,12 @@ import {
 } from "./components";
 import { useSessions } from "./useSessions";
 import api from "../../../api";
+import { PageHeader } from "@/components/PageHeader";
 import styles from "./index.module.less";
 
 function SessionsPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const {
     sessions,
     loading,
@@ -39,6 +36,8 @@ function SessionsPage() {
   const [filterUserId, setFilterUserId] = useState<string>("");
   const [filterChannel, setFilterChannel] = useState<string>("");
   const [availableChannels, setAvailableChannels] = useState<string[]>([]);
+
+  const { message } = useAppMessage();
 
   useEffect(() => {
     const fetchChannelTypes = async () => {
@@ -91,6 +90,10 @@ function SessionsPage() {
     });
   };
 
+  const handleView = (session: Session) => {
+    navigate(`/chat/${encodeURIComponent(session.id)}`);
+  };
+
   const handleBatchDelete = () => {
     if (selectedRowKeys.length === 0) {
       message.warning(t("sessions.batchDeleteConfirm", { count: 0 }));
@@ -124,7 +127,6 @@ function SessionsPage() {
       setSaving(true);
       try {
         const updated = {
-          ...editingSession,
           name: values.name,
         };
         const success = await updateSession(editingSession.id, updated);
@@ -140,6 +142,7 @@ function SessionsPage() {
   const columns = createColumns({
     onEdit: handleEdit,
     onDelete: handleDelete,
+    onView: handleView,
     t,
   });
 
@@ -154,27 +157,25 @@ function SessionsPage() {
 
   return (
     <div className={styles.sessionsPage}>
-      <div className={styles.header}>
-        <div className={styles.headerInfo}>
-          <h1 className={styles.title}>{t("sessions.title")}</h1>
-          <p className={styles.description}>{t("sessions.description")}</p>
-        </div>
-        {selectedRowKeys.length > 0 && (
-          <Button type="primary" danger onClick={handleBatchDelete}>
-            {t("sessions.batchDeleteButton")} ({selectedRowKeys.length})
-          </Button>
-        )}
-      </div>
-
-      <div className={styles.filterBar}>
-        <FilterBar
-          filterUserId={filterUserId}
-          filterChannel={filterChannel}
-          uniqueChannels={availableChannels}
-          onUserIdChange={setFilterUserId}
-          onChannelChange={setFilterChannel}
-        />
-      </div>
+      <PageHeader
+        items={[{ title: t("nav.control") }, { title: t("sessions.title") }]}
+        extra={
+          <div className={styles.headerRight}>
+            <FilterBar
+              filterUserId={filterUserId}
+              filterChannel={filterChannel}
+              uniqueChannels={availableChannels}
+              onUserIdChange={setFilterUserId}
+              onChannelChange={setFilterChannel}
+            />
+            {selectedRowKeys.length > 0 && (
+              <Button type="primary" danger onClick={handleBatchDelete}>
+                {t("sessions.batchDeleteButton")} ({selectedRowKeys.length})
+              </Button>
+            )}
+          </div>
+        }
+      />
 
       <Card className={styles.tableCard} bodyStyle={{ padding: 0 }}>
         <Table
@@ -189,7 +190,7 @@ function SessionsPage() {
           scroll={{ x: 1500 }}
           pagination={{
             pageSize: 10,
-            showTotal: (total) => t("sessions.totalItems", { count: total }),
+            showSizeChanger: false,
           }}
         />
       </Card>

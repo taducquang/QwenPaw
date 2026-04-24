@@ -1,0 +1,209 @@
+import React, { useMemo } from "react";
+import { Input } from "antd";
+import { IconButton } from "@agentscope-ai/design";
+import {
+  SparkEditLine,
+  SparkDeleteLine,
+  SparkMarkLine,
+  SparkMarkFill,
+} from "@agentscope-ai/icons";
+import { useTranslation } from "react-i18next";
+import { ChannelIcon } from "../../../Control/Channels/components";
+import {
+  ContextMenu,
+  useContextMenu,
+  type ContextMenuItem,
+} from "../../../../components/ContextMenu";
+import type { ChatStatus } from "../../../../api/types/chat";
+import styles from "./index.module.less";
+
+interface ChatSessionItemProps {
+  /** Session display name */
+  name: string;
+  /** Pre-formatted creation time string */
+  time: string;
+  /** Channel key (e.g. console, dingtalk) — used with shared channel icons */
+  channelKey?: string;
+  /** Localized channel label (e.g. Console, DingTalk) */
+  channelLabel?: string;
+  chatStatus?: ChatStatus;
+  generating?: boolean;
+  /** Whether this is the currently selected session */
+  active?: boolean;
+  /** Whether the item is in inline-edit mode */
+  editing?: boolean;
+  /** Current value of the edit input */
+  editValue?: string;
+  /** Whether the chat is pinned */
+  pinned?: boolean;
+  /** Click callback */
+  onClick?: () => void;
+  /** Edit button callback */
+  onEdit?: () => void;
+  /** Delete button callback */
+  onDelete?: () => void;
+  /** Pin button callback */
+  onPin?: () => void;
+  /** Edit input value change callback */
+  onEditChange?: (value: string) => void;
+  /** Confirm edit callback (Enter key or blur) */
+  onEditSubmit?: () => void;
+  /** Cancel edit callback */
+  onEditCancel?: () => void;
+  className?: string;
+}
+
+const ChatSessionItem: React.FC<ChatSessionItemProps> = (props) => {
+  const { t } = useTranslation();
+  const contextMenu = useContextMenu();
+
+  const inProgress =
+    props.generating === true || props.chatStatus === "running";
+  const statusAriaLabel = inProgress
+    ? t("chat.statusInProgress")
+    : t("chat.statusIdle");
+
+  const contextMenuItems: ContextMenuItem[] = useMemo(
+    () => [
+      {
+        key: "open",
+        label: t("chat.contextMenu.open", "Open"),
+        onClick: props.onClick,
+      },
+      {
+        key: "rename",
+        label: t("chat.contextMenu.rename", "Rename"),
+        onClick: props.onEdit,
+      },
+      {
+        key: "pin",
+        label: props.pinned
+          ? t("chat.contextMenu.unpin", "Unpin")
+          : t("chat.contextMenu.pin", "Pin"),
+        onClick: props.onPin,
+      },
+      { key: "divider-1", label: "", divider: true },
+      {
+        key: "delete",
+        label: t("chat.contextMenu.delete", "Delete"),
+        danger: true,
+        onClick: props.onDelete,
+      },
+    ],
+    [t, props.onClick, props.onEdit, props.onPin, props.onDelete, props.pinned],
+  );
+
+  const className = [
+    styles.chatSessionItem,
+    props.active ? styles.active : "",
+    props.editing ? styles.editing : "",
+    props.pinned ? styles.pinned : "",
+    props.className || "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  return (
+    <div
+      className={className}
+      onClick={props.editing ? undefined : props.onClick}
+      onContextMenu={props.editing ? undefined : contextMenu.show}
+    >
+      {/* Timeline indicator placeholder */}
+      <div className={styles.iconPlaceholder} />
+      <div className={styles.content}>
+        {props.editing ? (
+          <Input
+            autoFocus
+            size="small"
+            value={props.editValue}
+            onChange={(e) => props.onEditChange?.(e.target.value)}
+            onPressEnter={props.onEditSubmit}
+            onBlur={props.onEditSubmit}
+            onClick={(e) => e.stopPropagation()}
+          />
+        ) : (
+          <div className={styles.titleRow}>
+            <div
+              className={styles.statusWrap}
+              role="img"
+              aria-label={statusAriaLabel}
+            >
+              <span
+                className={`${styles.statusDot} ${
+                  inProgress ? styles.statusDotActive : styles.statusDotIdle
+                }`}
+                aria-hidden
+              />
+            </div>
+            <div className={styles.name}>{props.name}</div>
+          </div>
+        )}
+        <div className={styles.metaRow}>
+          <span className={styles.time}>{props.time}</span>
+          {(props.channelKey || props.channelLabel) && (
+            <span
+              className={styles.channelTag}
+              title={props.channelLabel || props.channelKey}
+            >
+              {props.channelKey ? (
+                <ChannelIcon channelKey={props.channelKey} size={14} />
+              ) : null}
+              {props.channelLabel ? (
+                <span className={styles.channelTagText}>
+                  {props.channelLabel}
+                </span>
+              ) : null}
+            </span>
+          )}
+        </div>
+      </div>
+      {/* Pin button - always visible when pinned, positioned independently */}
+      {!props.editing && (
+        <IconButton
+          bordered={false}
+          size="small"
+          className={styles.pinButton}
+          data-pinned={props.pinned}
+          icon={props.pinned ? <SparkMarkFill /> : <SparkMarkLine />}
+          onClick={(e) => {
+            e.stopPropagation();
+            props.onPin?.();
+          }}
+        />
+      )}
+      {/* Action buttons - edit and delete, only visible on hover */}
+      {!props.editing && (
+        <div className={styles.actions}>
+          <IconButton
+            bordered={false}
+            size="small"
+            icon={<SparkEditLine />}
+            onClick={(e) => {
+              e.stopPropagation();
+              props.onEdit?.();
+            }}
+          />
+          <IconButton
+            bordered={false}
+            size="small"
+            icon={<SparkDeleteLine />}
+            onClick={(e) => {
+              e.stopPropagation();
+              props.onDelete?.();
+            }}
+          />
+        </div>
+      )}
+      <ContextMenu
+        visible={contextMenu.visible}
+        x={contextMenu.x}
+        y={contextMenu.y}
+        items={contextMenuItems}
+        onClose={contextMenu.hide}
+      />
+    </div>
+  );
+};
+
+export default ChatSessionItem;

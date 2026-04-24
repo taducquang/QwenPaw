@@ -1,34 +1,11 @@
 import { request } from "../request";
-import { getApiUrl, getApiToken } from "../config";
+import { getApiUrl } from "../config";
+import { buildAuthHeaders } from "../authHeaders";
 import type { MdFileInfo, MdFileContent, DailyMemoryFile } from "../types";
-
-function buildHeaders(): HeadersInit {
-  const headers: Record<string, string> = {};
-
-  const token = getApiToken();
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-
-  try {
-    const agentStorage = localStorage.getItem("copaw-agent-storage");
-    if (agentStorage) {
-      const parsed = JSON.parse(agentStorage);
-      const selectedAgent = parsed?.state?.selectedAgent;
-      if (selectedAgent) {
-        headers["X-Agent-Id"] = selectedAgent;
-      }
-    }
-  } catch (error) {
-    console.warn("Failed to get selected agent from storage:", error);
-  }
-
-  return headers;
-}
 
 function getSelectedAgentId(): string {
   try {
-    const agentStorage = localStorage.getItem("copaw-agent-storage");
+    const agentStorage = localStorage.getItem("qwenpaw-agent-storage");
     if (agentStorage) {
       const parsed = JSON.parse(agentStorage);
       const selectedAgent = parsed?.state?.selectedAgent;
@@ -51,7 +28,7 @@ function generateFallbackFilename(): string {
     .replace(/\..+/, "")
     .replace("T", "_")
     .slice(0, 15); // YYYYMMDD_HHMMSS
-  return `copaw_workspace_${agentId}_${timestamp}.zip`;
+  return `qwenpaw_workspace_${agentId}_${timestamp}.zip`;
 }
 
 export interface WorkspaceDownloadResult {
@@ -61,7 +38,7 @@ export interface WorkspaceDownloadResult {
 
 export const workspaceApi = {
   listFiles: () =>
-    request<MdFileInfo[]>("/agent/files").then((files) =>
+    request<MdFileInfo[]>("/workspace/files").then((files) =>
       files.map((file) => ({
         ...file,
         updated_at: new Date(file.modified_time).getTime(),
@@ -69,11 +46,11 @@ export const workspaceApi = {
     ),
 
   loadFile: (fileName: string) =>
-    request<MdFileContent>(`/agent/files/${encodeURIComponent(fileName)}`),
+    request<MdFileContent>(`/workspace/files/${encodeURIComponent(fileName)}`),
 
   saveFile: (fileName: string, content: string) =>
     request<Record<string, unknown>>(
-      `/agent/files/${encodeURIComponent(fileName)}`,
+      `/workspace/files/${encodeURIComponent(fileName)}`,
       {
         method: "PUT",
         body: JSON.stringify({ content }),
@@ -84,7 +61,7 @@ export const workspaceApi = {
   downloadWorkspace: async (): Promise<WorkspaceDownloadResult> => {
     const response = await fetch(getApiUrl("/workspace/download"), {
       method: "GET",
-      headers: buildHeaders(),
+      headers: buildAuthHeaders(),
     });
 
     if (!response.ok) {
@@ -122,7 +99,7 @@ export const workspaceApi = {
 
     const response = await fetch(getApiUrl("/workspace/upload"), {
       method: "POST",
-      headers: buildHeaders(),
+      headers: buildAuthHeaders(),
       body: formData,
     });
 
@@ -137,7 +114,7 @@ export const workspaceApi = {
   },
 
   listDailyMemory: () =>
-    request<MdFileInfo[]>("/agent/memory").then((files) =>
+    request<MdFileInfo[]>("/workspace/memory").then((files) =>
       files.map((file) => {
         const date = file.filename.replace(".md", "");
         return {
@@ -149,11 +126,11 @@ export const workspaceApi = {
     ),
 
   loadDailyMemory: (date: string) =>
-    request<MdFileContent>(`/agent/memory/${encodeURIComponent(date)}.md`),
+    request<MdFileContent>(`/workspace/memory/${encodeURIComponent(date)}.md`),
 
   saveDailyMemory: (date: string, content: string) =>
     request<Record<string, unknown>>(
-      `/agent/memory/${encodeURIComponent(date)}.md`,
+      `/workspace/memory/${encodeURIComponent(date)}.md`,
       {
         method: "PUT",
         body: JSON.stringify({ content }),
@@ -161,10 +138,11 @@ export const workspaceApi = {
     ),
 
   // System prompt files management
-  getSystemPromptFiles: () => request<string[]>("/agent/system-prompt-files"),
+  getSystemPromptFiles: () =>
+    request<string[]>("/workspace/system-prompt-files"),
 
   setSystemPromptFiles: (files: string[]) =>
-    request<string[]>("/agent/system-prompt-files", {
+    request<string[]>("/workspace/system-prompt-files", {
       method: "PUT",
       body: JSON.stringify(files),
     }),
