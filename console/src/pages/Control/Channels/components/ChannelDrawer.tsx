@@ -30,6 +30,7 @@ const CHANNELS_WITH_ACCESS_CONTROL: ChannelKey[] = [
   "weixin",
   "imessage",
   "onebot",
+  "zalouser",
 ];
 
 // Doc EN URLs per channel (anchors on https://qwenpaw.agentscope.io/docs/channels)
@@ -54,6 +55,8 @@ const CHANNEL_DOC_EN_URLS: Partial<Record<ChannelKey, string>> = {
     "https://developer.huawei.com/consumer/cn/doc/service/openclaw-0000002518410344",
   onebot:
     "https://qwenpaw.agentscope.io/docs/channels/?lang=en#OneBot-v11-NapCat--QQ-full-protocol",
+  zalouser:
+    "https://qwenpaw.agentscope.io/docs/channels/?lang=en#Zalo-Personal-Account",
 };
 
 // Doc ZH URLs per channel (anchors on https://qwenpaw.agentscope.io/docs/channels)
@@ -75,6 +78,8 @@ const CHANNEL_DOC_ZH_URLS: Partial<Record<ChannelKey, string>> = {
     "https://developer.huawei.com/consumer/cn/doc/service/openclaw-0000002518410344",
   onebot:
     "https://qwenpaw.agentscope.io/docs/channels/?lang=zh#OneBot-v11NapCat--QQ-完整协议",
+  zalouser:
+    "https://qwenpaw.agentscope.io/docs/channels/?lang=zh#Zalo-个人账号",
 };
 
 const TWILIO_CONSOLE_URL = "https://console.twilio.com";
@@ -196,6 +201,26 @@ export function ChannelDrawer({
     onError: useCallback(
       (_type: "fetch" | "expired") => {
         message.error(t("channels.wecomQrcodeFailed"));
+      },
+      [message, t],
+    ),
+  });
+
+  // Zalo QR code hook
+  const zalouserQrcode = useChannelQrcode({
+    channel: "zalouser",
+    successStatus: "success",
+    successCredentialKey: "cookies",
+    pollInterval: 3000,
+    onSuccess: useCallback(
+      (credentials: Record<string, string>) => {
+        message.success(t("channels.zalouserAuthSuccess"));
+      },
+      [form, message, t],
+    ),
+    onError: useCallback(
+      (_type: "fetch" | "expired") => {
+        message.error(t("channels.zalouserQrcodeFailed"));
       },
       [message, t],
     ),
@@ -1146,6 +1171,63 @@ export function ChannelDrawer({
               label={t("channels.onebotShareSessionInGroup")}
               valuePropName="checked"
               tooltip={t("channels.onebotShareSessionInGroupTooltip")}
+            >
+              <Switch />
+            </Form.Item>
+          </>
+        );
+
+      case "zalouser":
+        return (
+          <>
+            <ConfigProvider prefixCls="ant">
+              <Alert
+                type="info"
+                showIcon
+                message={t("channels.zalouserSetupGuide")}
+                style={{ marginBottom: 16 }}
+              />
+            </ConfigProvider>
+            <Form.Item label={t("channels.zalouserScanAuth")}>
+              <Button
+                type="primary"
+                block
+                loading={zalouserQrcode.loading}
+                onClick={zalouserQrcode.fetchQrcode}
+              >
+                {t("channels.zalouserGetQrcode")}
+              </Button>
+              {zalouserQrcode.loading && (
+                <div style={{ textAlign: "center", marginTop: 12 }}>
+                  <Spin />
+                </div>
+              )}
+              {zalouserQrcode.qrcodeImg && !zalouserQrcode.loading && (
+                <div style={{ textAlign: "center", marginTop: 12 }}>
+                  <img
+                    src={`data:image/png;base64,${zalouserQrcode.qrcodeImg}`}
+                    alt="Zalo QR Code"
+                    style={{ width: 200, height: 200 }}
+                  />
+                  <div
+                    style={{
+                      marginTop: 8,
+                      fontSize: 12,
+                      color: isDark
+                        ? "rgba(255,255,255,0.45)"
+                        : "rgba(0,0,0,0.45)",
+                    }}
+                  >
+                    {t("channels.zalouserScanHint")}
+                  </div>
+                </div>
+              )}
+            </Form.Item>
+            <Form.Item
+              name="show_typing"
+              label={t("channels.showTyping")}
+              valuePropName="checked"
+              tooltip={t("channels.showTypingTooltip")}
             >
               <Switch />
             </Form.Item>
